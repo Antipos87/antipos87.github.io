@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>КотоВасия: кликер-антистресс</title>
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+body {
+	color: white;
+	background-color: black;
+	overflow: hidden;
+	touch-action: none;
+	/* No text selection, iOS long-press callout or tap flash over the game (req. 1.6). */
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+#canvas {
+	display: block;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+#status, #status-splash, #status-progress {
+	position: absolute;
+	left: 0;
+	right: 0;
+}
+
+#status, #status-splash {
+	top: 0;
+	bottom: 0;
+}
+
+#status {
+	background-color: #242424;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	visibility: hidden;
+}
+
+#status-splash {
+	max-height: 100%;
+	max-width: 100%;
+	margin: auto;
+}
+
+#status-splash.show-image--false {
+	display: none;
+}
+
+#status-splash.fullsize--true {
+	height: 100%;
+	width: 100%;
+	object-fit: contain;
+}
+
+#status-splash.use-filter--false {
+	image-rendering: pixelated;
+}
+
+#status-progress, #status-notice {
+	display: none;
+}
+
+#status-progress {
+	bottom: 10%;
+	width: 50%;
+	margin: 0 auto;
+}
+
+#status-notice {
+	background-color: #5b3943;
+	border-radius: 0.5rem;
+	border: 1px solid #9b3943;
+	color: #e0e0e0;
+	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+	line-height: 1.3;
+	margin: 0 2rem;
+	overflow: hidden;
+	padding: 1rem;
+	text-align: center;
+	z-index: 1;
+}
+		</style>
+		<link id="-gd-engine-icon" rel="icon" type="image/png" href="CatClickerGodot.icon.png" />
+		<link rel="apple-touch-icon" href="CatClickerGodot.apple-touch-icon.png"/>
+
+		<!-- Yandex Games SDK -->
+		<!-- Pikabu test build: no Yandex SDK (the game starts on its own, in Russian) -->
+	</head>
+	<body>
+		<canvas id="canvas">
+			Your browser does not support the canvas tag.
+		</canvas>
+
+		<noscript>
+			Your browser does not support JavaScript.
+		</noscript>
+
+		<div id="status">
+			<img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="CatClickerGodot.png" alt="">
+			<progress id="status-progress"></progress>
+			<div id="status-notice"></div>
+		</div>
+
+		<script src="CatClickerGodot.js"></script>
+		<script>
+window.ysdk = null;
+window.ysdkPlayerPromise = null;
+window.ysdkPaymentsPromise = null;
+window.yandexLang = 'ru';
+window.catPlatformPaused = false;
+function notifyGamePause(event) {
+	if (window.godot_ad_callback) window.godot_ad_callback(event);
+}
+
+// Cloud saves (Yandex Player Data API). Godot calls these two via JavaScriptBridge.eval;
+// window.ysdkPlayerPromise resolves once (started right after YaGames.init()), so calls
+// made before the player is ready just wait on the same promise instead of failing.
+window.catCloudLoad = function (token) {
+	const respond = (payload) => { if (window.godot_save_callback) window.godot_save_callback('load_ok', token, payload); };
+	const fail = () => { if (window.godot_save_callback) window.godot_save_callback('load_err', token, ''); };
+	if (!window.ysdkPlayerPromise) { fail(); return; }
+	window.ysdkPlayerPromise
+		.then((player) => player.getData(['save']))
+		.then((data) => respond(JSON.stringify((data && data.save) || {})))
+		.catch((e) => { console.warn('[YandexSDK] getData error', e); fail(); });
+};
+window.catCloudSave = function (token, jsonPayload) {
+	const respond = (ok) => { if (window.godot_save_callback) window.godot_save_callback(ok ? 'save_ok' : 'save_err', token, ''); };
+	if (!window.ysdkPlayerPromise) { respond(false); return; }
+	let parsed;
+	try { parsed = JSON.parse(jsonPayload); } catch (e) { respond(false); return; }
+	window.ysdkPlayerPromise
+		.then((player) => player.setData({ save: parsed }, true))
+		.then(() => respond(true))
+		.catch((e) => { console.warn('[YandexSDK] setData error', e); respond(false); });
+};
+// In-app purchases (Yandex Payments API). Same request/callback pattern as the
+// cloud save bridge above. getPurchases()/consumePurchase() exist specifically so
+// a purchase that succeeded but never got consumed (closed tab mid-flow, crash,
+// etc.) is caught and settled on the next launch — Yandex requires this to pass
+// moderation, since unconsumed purchases block it.
+window.catIAPGetPurchases = function (token) {
+	const respond = (payload) => { if (window.godot_iap_callback) window.godot_iap_callback('purchases_ok', token, payload); };
+	const fail = () => { if (window.godot_iap_callback) window.godot_iap_callback('purchases_err', token, ''); };
+	if (!window.ysdkPaymentsPromise) { fail(); return; }
+	window.ysdkPaymentsPromise
+		.then((payments) => payments.getPurchases())
+		.then((purchases) => respond(JSON.stringify(purchases || [])))
+		.catch((e) => { console.warn('[YandexSDK] getPurchases error', e); fail(); });
+};
+window.catIAPPurchase = function (token, productID) {
+	const respond = (purchaseToken) => { if (window.godot_iap_callback) window.godot_iap_callback('purchase_ok', token, purchaseToken); };
+	const fail = () => { if (window.godot_iap_callback) window.godot_iap_callback('purchase_err', token, ''); };
+	if (!window.ysdkPaymentsPromise) { fail(); return; }
+	window.ysdkPaymentsPromise
+		.then((payments) => payments.purchase({ id: productID }))
+		.then((purchase) => respond((purchase && purchase.purchaseToken) || ''))
+		.catch((e) => { console.warn('[YandexSDK] purchase error/cancel', e); fail(); });
+};
+window.catIAPConsume = function (token, purchaseToken) {
+	const respond = (ok) => { if (window.godot_iap_callback) window.godot_iap_callback(ok ? 'consume_ok' : 'consume_err', token, ''); };
+	if (!window.ysdkPaymentsPromise) { respond(false); return; }
+	window.ysdkPaymentsPromise
+		.then((payments) => payments.consumePurchase(purchaseToken))
+		.then(() => respond(true))
+		.catch((e) => { console.warn('[YandexSDK] consumePurchase error', e); respond(false); });
+};
+
+// Authorization + leaderboards. Reading the table works for guests; writing a score
+// needs a logged-in Yandex account, and the login dialog may only be opened from a
+// player's tap (catAuthOpen is called from the "Войти" button).
+function catPlayerAuthorized(player) {
+	if (!player) return false;
+	if (typeof player.isAuthorized === 'function') return player.isAuthorized();
+	return typeof player.getMode === 'function' && player.getMode() !== 'lite';
+}
+function catLbRespond(event, token, payload) {
+	if (window.godot_lb_callback) window.godot_lb_callback(event, token, payload || '');
+}
+window.catAuthState = function (token) {
+	if (!window.ysdkPlayerPromise) { catLbRespond('auth_state', token, 'false'); return; }
+	window.ysdkPlayerPromise
+		.then((player) => catLbRespond('auth_state', token, String(catPlayerAuthorized(player))))
+		.catch(() => catLbRespond('auth_state', token, 'false'));
+};
+window.catAuthOpen = function (token) {
+	if (!window.ysdk || !window.ysdk.auth) { catLbRespond('auth_state', token, 'false'); return; }
+	window.ysdk.auth.openAuthDialog()
+		.then(() => {
+			// The old player object stays a guest one: fetch it again, and let cloud
+			// saves use the logged-in player from now on.
+			window.ysdkPlayerPromise = window.ysdk.getPlayer();
+			window.ysdkPlayerPromise.catch(() => {});
+			return window.ysdkPlayerPromise;
+		})
+		.then((player) => catLbRespond('auth_state', token, String(catPlayerAuthorized(player))))
+		.catch((e) => { console.warn('[YandexSDK] openAuthDialog closed/failed', e); catLbRespond('auth_state', token, 'false'); });
+};
+window.catLbSetScore = function (token, name, score) {
+	const fail = () => catLbRespond('score_err', token, '');
+	if (!window.ysdk || !window.ysdk.leaderboards || !window.ysdkPlayerPromise) { fail(); return; }
+	window.ysdkPlayerPromise
+		.then((player) => {
+			if (!catPlayerAuthorized(player)) throw new Error('not authorized');
+			return window.ysdk.leaderboards.setScore(name, Math.min(Math.floor(score), Number.MAX_SAFE_INTEGER));
+		})
+		.then(() => catLbRespond('score_ok', token, ''))
+		.catch((e) => { console.warn('[YandexSDK] setScore error', e); fail(); });
+};
+window.catLbGetEntries = function (token, name) {
+	const fail = () => catLbRespond('entries_err', token, '');
+	if (!window.ysdk || !window.ysdk.leaderboards || !window.ysdkPlayerPromise) { fail(); return; }
+	window.ysdkPlayerPromise
+		.catch(() => null)
+		.then((player) => {
+			const authorized = catPlayerAuthorized(player);
+			const myID = authorized && typeof player.getUniqueID === 'function' ? player.getUniqueID() : '';
+			const options = authorized ? { quantityTop: 10, includeUser: true, quantityAround: 2 } : { quantityTop: 10 };
+			return window.ysdk.leaderboards.getEntries(name, options).then((result) => ({ result, authorized, myID }));
+		})
+		.then(({ result, authorized, myID }) => {
+			const entries = ((result && result.entries) || []).map((e) => ({
+				rank: e.rank,
+				score: e.score,
+				name: (e.player && e.player.publicName) || '',
+				me: !!myID && !!e.player && e.player.uniqueID === myID,
+			}));
+			catLbRespond('entries_ok', token, JSON.stringify({ authorized, userRank: (result && result.userRank) || 0, entries }));
+		})
+		.catch((e) => { console.warn('[YandexSDK] getEntries error', e); fail(); });
+};
+
+document.addEventListener('visibilitychange', () => {
+	notifyGamePause(document.hidden ? 'visibility_pause' : 'visibility_resume');
+});
+
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":20385720,"index.wasm":37695054},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_THREADS_ENABLED = false;
+
+function detectLanguage(sdk) {
+	try {
+		// Read the SDK property on every startup, including debug-panel launches.
+		const sdkLanguage = sdk ? sdk.environment.i18n.lang : 'ru';
+		const language = String(sdkLanguage || 'ru').toLowerCase().split(/[-_]/)[0];
+		const supported = ['ru', 'en', 'kk', 'de', 'fr', 'es', 'ja', 'zh', 'ko', 'ar'];
+		if (supported.includes(language)) return language;
+		return ['be', 'kk', 'uk', 'uz'].includes(language) ? 'ru' : 'en';
+	} catch (e) {
+		console.warn('[YandexSDK] Ошибка чтения языка:', e);
+		return 'ru';
+	}
+}
+// Must match the game name entered for each language in the Yandex draft (req. 5.1.3).
+const CAT_GAME_TITLES = {
+	ru: 'КотоВасия: кликер-антистресс',
+	en: 'KotoVasia: Anti-Stress Clicker',
+	kk: 'КотоВасия: антистресс кликер',
+	de: 'KotoVasia: Anti-Stress-Clicker',
+	fr: 'KotoVasia: clicker anti-stress',
+	es: 'KotoVasia: clicker antiestrés',
+	ja: 'KotoVasia: 癒やしのクリッカー',
+	zh: 'KotoVasia: 解压点击游戏',
+	ko: 'KotoVasia: 힐링 클리커',
+	ar: 'KotoVasia: لعبة نقر مضادة للتوتر',
+};
+// Godot overwrites document.title with the project name while it boots. A MutationObserver
+// puts the right name back whenever anything else writes the title; the game calls
+// catSetTitle when the player switches language.
+window.catWantedTitle = CAT_GAME_TITLES.ru;
+window.catSetTitle = function (lang) {
+	window.catWantedTitle = CAT_GAME_TITLES[lang] || CAT_GAME_TITLES.en;
+	if (document.title !== window.catWantedTitle) document.title = window.catWantedTitle;
+};
+new MutationObserver(() => {
+	if (document.title !== window.catWantedTitle) document.title = window.catWantedTitle;
+}).observe(document.head, { subtree: true, childList: true, characterData: true });
+function startGodotEngine(targetLang) {
+	window.yandexLang = targetLang;
+	window.catSetTitle(targetLang);
+	GODOT_CONFIG['locale'] = targetLang;
+	console.log('[YandexSDK] Запуск движка с языком:', targetLang);
+
+	const engine = new Engine(GODOT_CONFIG);
+	const statusOverlay = document.getElementById('status');
+	const statusProgress = document.getElementById('status-progress');
+	const statusNotice = document.getElementById('status-notice');
+
+	let initializing = true;
+	let statusMode = '';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) return;
+		if (mode === 'hidden') {
+			statusOverlay.remove();
+			initializing = false;
+			return;
+		}
+		statusOverlay.style.visibility = 'visible';
+		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+		statusMode = mode;
+	}
+
+	function setStatusNotice(text) {
+		while (statusNotice.lastChild) {
+			statusNotice.removeChild(statusNotice.lastChild);
+		}
+		const lines = text.split('\n');
+		lines.forEach((line) => {
+			statusNotice.appendChild(document.createTextNode(line));
+			statusNotice.appendChild(document.createElement('br'));
+		});
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		if (err instanceof Error) {
+			setStatusNotice(err.message);
+		} else if (typeof err === 'string') {
+			setStatusNotice(err);
+		} else {
+			setStatusNotice('An unknown error occurred.');
+		}
+		setStatusMode('notice');
+		initializing = false;
+	}
+
+	const missing = Engine.getMissingFeatures({
+		threads: GODOT_THREADS_ENABLED,
+	});
+
+	if (missing.length !== 0) {
+		const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+		displayFailureNotice(missingMsg + missing.join('\n'));
+	} else {
+		setStatusMode('progress');
+		engine.startGame({
+			'onProgress': function (current, total) {
+				if (current > 0 && total > 0) {
+					statusProgress.value = current;
+					statusProgress.max = total;
+				} else {
+					statusProgress.removeAttribute('value');
+					statusProgress.removeAttribute('max');
+				}
+			},
+		}).then(() => {
+			setStatusMode('hidden');
+		}, displayFailureNotice);
+	}
+}
+
+if (typeof YaGames !== 'undefined') {
+	YaGames.init().then((sdk) => {
+		window.ysdk = sdk;
+		// The promises stay rejected for their callers (cloud save / IAP report the failure),
+		// but the extra no-op catch keeps an "Uncaught (in promise)" error out of the console
+		// when nobody is waiting on them yet (req. 1.14: no JS errors in the console).
+		window.ysdkPlayerPromise = sdk.getPlayer();
+		window.ysdkPlayerPromise.catch((err) => console.warn('[YandexSDK] Ошибка получения Player:', err));
+		// Build without purchases (GameConfig.IAP_ENABLED = false): payments are never requested.
+		// To bring them back, set CAT_IAP_ENABLED = true here and IAP_ENABLED = true in GameConfig.gd.
+		const CAT_IAP_ENABLED = false;
+		if (CAT_IAP_ENABLED) {
+			window.ysdkPaymentsPromise = sdk.getPayments({ signed: false });
+			window.ysdkPaymentsPromise.catch((err) => console.warn('[YandexSDK] Ошибка получения Payments (покупки не подключены?):', err));
+		}
+		const lang = detectLanguage(sdk);
+		sdk.on('game_api_pause', () => {
+			window.catPlatformPaused = true;
+			notifyGamePause('platform_pause');
+		});
+		sdk.on('game_api_resume', () => {
+			window.catPlatformPaused = false;
+			notifyGamePause('platform_resume');
+		});
+		console.log('[YandexSDK] ysdk успешно инициализирован');
+		startGodotEngine(lang);
+	}).catch((err) => {
+		console.error('[YandexSDK] Ошибка YaGames.init():', err);
+		startGodotEngine(detectLanguage(null));
+	});
+} else {
+	startGodotEngine(detectLanguage(null));
+}
+		</script>
+	</body>
+</html>
+
