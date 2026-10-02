@@ -94,7 +94,8 @@ body {
 	text-align: center;
 	z-index: 1;
 }
-		</style>
+		html { overflow: hidden; height: 100%; }
+</style>
 		<link id="-gd-engine-icon" rel="icon" type="image/png" href="CatClickerGodot.icon.png" />
 		<link rel="apple-touch-icon" href="CatClickerGodot.apple-touch-icon.png"/>
 
@@ -118,6 +119,10 @@ body {
 
 		<script src="CatClickerGodot.js"></script>
 		<script>
+// Read by YandexSDK.gd: which site this page is for (vk.html sets 'vk') and whether
+// purchases are on (window.catIAPEnabled, set below from CAT_IAP_ENABLED).
+window.catPlatform = 'yandex';
+window.catIAPEnabled = false;
 window.ysdk = null;
 window.ysdkPlayerPromise = null;
 window.ysdkPaymentsPromise = null;
@@ -249,7 +254,7 @@ document.addEventListener('visibilitychange', () => {
 	notifyGamePause(document.hidden ? 'visibility_pause' : 'visibility_resume');
 });
 
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"CatClickerGodot","experimentalVK":false,"fileSizes":{"CatClickerGodot.pck":20385720,"CatClickerGodot.wasm":37695054},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"CatClickerGodot","experimentalVK":false,"fileSizes":{"CatClickerGodot.pck":20386520,"CatClickerGodot.wasm":37695054},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 
 function detectLanguage(sdk) {
@@ -375,6 +380,7 @@ function startGodotEngine(targetLang) {
 //   language: always Russian first (a platform rule)
 //   no leaderboards, no banners on Pikabu.
 
+window.catPlatform = 'pikabu';  // read by YandexSDK.gd: no leaderboard here
 const CAT_CLOUD_URL = '';  // the save function's URL; until it exists, saves stay in the browser
 const CAT_LOCAL_KEY = 'kotovasia_pikabu_save';
 
