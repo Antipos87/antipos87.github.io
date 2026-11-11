@@ -59,3 +59,6 @@ button{font:inherit}.theme-toggle{background:var(--surface);color:var(--ink);bor
 @media(max-width:1050px){.game-body{padding:22px}.game-body h3{font-size:25px}}
 @media(max-width:760px){.games{grid-template-columns:1fr;gap:18px}.game-body h3{font-size:24px}.store-link{min-width:140px;padding:10px 12px}.shots{grid-template-columns:repeat(2,1fr);gap:12px;margin-top:24px}.shots img{border-radius:18px}}
 @media(max-width:360px){.store-link{min-width:0;flex:1;gap:10px;padding:10px}.store-link strong{font-size:12px}}
+
+.features+.features{margin-top:20px}.features+.cat-gallery{margin-top:44px}.section-links{justify-content:center;margin-top:34px}
+@media(max-width:760px){.features+.features{margin-top:14px}.features+.cat-gallery{margin-top:30px}}
